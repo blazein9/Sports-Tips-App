@@ -3,7 +3,7 @@ import { auth } from './firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import AuthPanel from './components/Auth';
 import TipGenerator from './components/TipGenerator';
-import { Tip, tips } from './data/tips';
+import { Tip, tips as sampleTips, fetchTipsFromGoogleSheet } from './data/tips';
 
 const categories = ['Football', 'Basketball', 'Tennis'] as const;
 
@@ -11,21 +11,55 @@ type Category = typeof categories[number];
 
 type RangeOption = 'any' | 'low' | 'medium' | 'high';
 
+type LocalUser = {
+  email: string;
+  displayName: string;
+  isLocalAdmin: true;
+};
+
+type AppUser = User | LocalUser;
+
 const App = () => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<Category>('Football');
   const [range, setRange] = useState<RangeOption>('any');
   const [generatedTip, setGeneratedTip] = useState<Tip | null>(null);
+  const [tipsData, setTipsData] = useState<Tip[]>(sampleTips);
 
   useEffect(() => {
+    const apiKey = import.meta.env.VITE_GOOGLE_SHEETS_API_KEY as string | undefined;
+
+    fetchTipsFromGoogleSheet(apiKey)
+      .then((loadedTips) => {
+        if (loadedTips.length > 0) {
+          setTipsData(loadedTips);
+        }
+      })
+      .catch((error) => {
+        console.warn('Could not load Google Sheet tips:', error);
+      });
+  }, []);
+
+  useEffect(() => {
+    const localAdminSignedIn = localStorage.getItem('localAdminSignedIn') === 'true';
+    if (localAdminSignedIn) {
+      setUser({ email: 'admin@sportstips.local', displayName: 'Admin', isLocalAdmin: true });
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+      const stillLocalAdmin = localStorage.getItem('localAdminSignedIn') === 'true';
+      if (currentUser) {
+        localStorage.removeItem('localAdminSignedIn');
+        setUser(currentUser);
+      } else if (!stillLocalAdmin) {
+        setUser(null);
+      }
     });
     return unsubscribe;
   }, []);
 
   const filteredTips = useMemo(() => {
-    return tips.filter((tip) => {
+    return tipsData.filter((tip) => {
       if (tip.category !== selectedCategory) return false;
       if (range === 'low') return tip.value <= 2;
       if (range === 'medium') return tip.value >= 3 && tip.value <= 4;
@@ -45,7 +79,14 @@ const App = () => {
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
+    if (localStorage.getItem('localAdminSignedIn') === 'true') {
+      localStorage.removeItem('localAdminSignedIn');
+      setUser(null);
+    } else {
+      await signOut(auth);
+      setUser(null);
+    }
+
     setGeneratedTip(null);
   };
 
@@ -57,7 +98,12 @@ const App = () => {
       </header>
 
       {!user ? (
-        <AuthPanel />
+        <AuthPanel
+          onLocalAdminSignIn={() => {
+            localStorage.setItem('localAdminSignedIn', 'true');
+            setUser({ email: 'admin@sportstips.local', displayName: 'Admin', isLocalAdmin: true });
+          }}
+        />
       ) : (
         <main>
           <section className="profile-bar">

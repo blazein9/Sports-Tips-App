@@ -8,6 +8,69 @@ export interface Tip {
   value: number;
 }
 
+export const SHEET_ID = '1aWsGvx7kX1UZRm6-3y4Mq-FRTf1A3AVZEtbIaedc-t8';
+export const SHEET_GID = '0';
+export const SHEET_RANGE = 'A2:E';
+
+const normalizeCell = (value: string | undefined) => (value ?? '').trim();
+
+const buildTipFromRow = (row: string[], index: number): Tip => {
+  const cells = row.map(normalizeCell);
+
+  if (cells.length >= 5) {
+    const [id, category, title, description, valueText] = cells;
+    return {
+      id: id || `tip-${index + 1}`,
+      category: category as Category,
+      title,
+      description,
+      value: Number(valueText) || 0,
+    };
+  }
+
+  if (cells.length === 4) {
+    const [category, title, description, valueText] = cells;
+    return {
+      id: `${category.toLowerCase().replace(/\s+/g, '-')}-${index + 1}`,
+      category: category as Category,
+      title,
+      description,
+      value: Number(valueText) || 0,
+    };
+  }
+
+  throw new Error('Unsupported Google Sheet row format. Use 4 or 5 columns with category, title, description, and value.');
+};
+
+const parseCsv = (csvText: string): Tip[] => {
+  const rows = csvText
+    .trim()
+    .split(/\r?\n/)
+    .map((row) =>
+      row
+        .split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/)
+        .map((cell) => cell.replace(/^\"|\"$/g, '').trim()),
+    );
+
+  if (rows.length === 0) return [];
+
+  const firstRow = rows[0].map((cell) => cell.toLowerCase());
+  const hasHeader = firstRow.includes('category') || firstRow.includes('title') || firstRow.includes('description');
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+
+  return dataRows.map((row, index) => buildTipFromRow(row, index));
+};
+
+const parseGoogleSheetsValues = (values: string[][]): Tip[] => {
+  if (values.length === 0) return [];
+
+  const firstRow = values[0].map((cell) => cell.toLowerCase());
+  const hasHeader = firstRow.includes('category') || firstRow.includes('title') || firstRow.includes('description');
+  const dataRows = hasHeader ? values.slice(1) : values;
+
+  return dataRows.map((row, index) => buildTipFromRow(row, index));
+};
+
 export const tips: Tip[] = [
   {
     id: 'football-1',
@@ -73,3 +136,29 @@ export const tips: Tip[] = [
     value: 3,
   },
 ];
+
+export const fetchTipsFromGoogleSheet = async (apiKey?: string): Promise<Tip[]> => {
+  const sheetId = SHEET_ID;
+
+  if (apiKey) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${SHEET_RANGE}?key=${apiKey}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`Google Sheets API request failed: ${response.status} ${response.statusText}`);
+    }
+
+    const json = await response.json();
+    return parseGoogleSheetsValues(json.values || []);
+  }
+
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${SHEET_GID}`;
+  const response = await fetch(csvUrl);
+
+  if (!response.ok) {
+    throw new Error('Unable to fetch the sheet. Make sure the Google Sheet is published or provide a valid API key.');
+  }
+
+  const csvText = await response.text();
+  return parseCsv(csvText);
+};

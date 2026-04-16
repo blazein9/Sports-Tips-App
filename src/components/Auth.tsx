@@ -8,10 +8,17 @@ import {
   signInWithPopup,
 } from 'firebase/auth';
 
+const ADMIN_EMAIL = 'admin@sportstips.local';
+const ADMIN_PASSWORD = 'admin123';
+
 const googleProvider = new GoogleAuthProvider();
 const facebookProvider = new FacebookAuthProvider();
 
-const AuthPanel = () => {
+type AuthPanelProps = {
+  onLocalAdminSignIn: () => void;
+};
+
+const AuthPanel = ({ onLocalAdminSignIn }: AuthPanelProps) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
@@ -23,6 +30,11 @@ const AuthPanel = () => {
 
     try {
       if (mode === 'signin') {
+        if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+          onLocalAdminSignIn();
+          return;
+        }
+
         await signInWithEmailAndPassword(auth, email, password);
       } else {
         await createUserWithEmailAndPassword(auth, email, password);
@@ -64,6 +76,13 @@ const AuthPanel = () => {
         <button type="button" onClick={() => socialLogin(facebookProvider)}>
           Continue with Facebook
         </button>
+      </div>
+
+      <div className="admin-signin">
+        <button type="button" onClick={onLocalAdminSignIn}>
+          Sign in as local admin
+        </button>
+        <p>Admin demo credentials: <strong>{ADMIN_EMAIL}</strong> / <strong>{ADMIN_PASSWORD}</strong></p>
       </div>
 
       <div className="toggle-mode">
